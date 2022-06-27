@@ -18,6 +18,7 @@ const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology:
 function verifyJWT(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader) {
+
     return res.status(401).send({ message: 'Unauthorized Access' });
   }
   const token = authHeader.split(' ')[1];
@@ -36,9 +37,19 @@ async function run() {
     const serviceCollection = client.db('docotors_portal').collection('services');
     const bookingCollection = client.db('docotors_portal').collection('booking');
     const userCollection = client.db('docotors_portal').collection('users');
+    const doctorCollection = client.db('docotors_portal').collection('doctors');
     console.log('connected');
 
 
+    const verifyAdmin = async (req, res, next) => {
+      const requester = req.decoded.email;
+      const requisterAccount = await userCollection.findOne({ email: requester });
+      if (requisterAccount.role === 'admin') {
+        next();
+      } else {
+        res.status(403).send({ message: 'forbidden' });
+      }
+    }
 
     app.get('/service', async (req, res) => {
       const query = {};
@@ -47,11 +58,12 @@ async function run() {
       res.send(services);
     });
 
-    app.get('/user', verifyJWT, async (req, res) => {
+    app.get('/user', async (req, res) => {
       const users = await userCollection.find().toArray();
       res.send(users);
     })
 
+    // check user role
     app.get('/admin/:email', async (req, res) => {
       const email = req.params.email;
       const user = await userCollection.findOne({ email: email });
@@ -59,21 +71,15 @@ async function run() {
       res.send({ admin: isAdmin });
     })
 
-    app.put('/user/admin/:email', verifyJWT, async (req, res) => {
+    // Make Admin ==========
+    app.put('/user/admin/:email', verifyJWT, verifyAdmin, async (req, res) => {
       const email = req.params.email;
-      const requester = req.decoded.email;
-      const requisterAccount = await userCollection.findOne({ email: requester });
-      if (requisterAccount.role === 'admin') {
-        const filter = { email: email };
-        const updateDoc = {
-          $set: { role: 'admin' },
-        };
-        const result = await userCollection.updateOne(filter, updateDoc);
-        res.send(result);
-      }
-      else {
-        res.status(403).send({ message: 'forbidden' });
-      }
+      const filter = { email: email };
+      const updateDoc = {
+        $set: { role: 'admin' },
+      };
+      const result = await userCollection.updateOne(filter, updateDoc);
+      res.send(result);
     })
 
     app.put('/user/:email', async (req, res) => {
@@ -98,6 +104,7 @@ async function run() {
     * app.delete('/booking/:id') // delete
     */
 
+    // get booking collection
     app.get('/booking', verifyJWT, async (req, res) => {
       const patient = req.query.patient;
       const decodedEmail = req.decoded.email;
@@ -111,6 +118,7 @@ async function run() {
       }
     })
 
+    // get my appointment API
     app.get('/booking/:id', verifyJWT, async (req, res) => {
       const id = req.params.id;
       const query = { _id: ObjectId(id) };
@@ -118,6 +126,7 @@ async function run() {
       res.send(booking);
     })
 
+    // appointment booking api
     app.post('/booking', async (req, res) => {
       const booking = req.body;
       const query = { treatment: booking.treatment, date: booking.date, patient: booking.patient }
@@ -127,6 +136,14 @@ async function run() {
       }
       const result = await bookingCollection.insertOne(booking);
       return res.send({ success: true, result });
+    })
+
+
+    // add doctor
+    app.post('/doctor', verifyAdmin, async (req, res) => {
+      const doctor = req.body;
+      const result = await doctorCollection.insertOne(doctor);
+      res.send(result);
     })
 
 
